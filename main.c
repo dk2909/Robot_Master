@@ -23,6 +23,7 @@
 #include <driverlib/interrupt.h>
 #include "driverlib/timer.h"
 #include "driverlib/adc.h"
+#include "driverlib/pwm.h"
 
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/UART.h>
@@ -49,6 +50,9 @@
 #define UARTINT "INT_UART0"
 #define UARTBAUDE 9600
 
+// PWM
+#define PWMFREQ 55
+
 ///////////////  Global Variables ///////////////
 
 int count = 0; // count entered characters in uart
@@ -70,6 +74,9 @@ void cmd_lookup(char *);
 // ADC
 void side_sensor_read(void);
 void front_sensor_read(void);
+// PWM
+void pwm_init(void);
+void pwm_start_motor(void);
 // Float to String
 void ftoa(float, char *, int);
 void reverse(char *, int);
@@ -87,11 +94,11 @@ void uart_int_handler(void){
     //uart_read();
 }
 
-///////////////  Main ///////////////7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7
+///////////////  Main ///////////////
 int main(void){
 	hw_init();
 	delay();
-	uart_print("Current commands: fo (forward), st (stop), sp (set speed), er (error)", 7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7+4);
+	uart_print("Current commands: on (on), fo (forward), st (stop), sp (set speed), er (error)", 8+7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7+4);
 	UARTCharPut(UART0_BASE, '\r');
 	UARTCharPut(UART0_BASE, '\n');
 	uart_cmd_start();
@@ -99,7 +106,6 @@ int main(void){
 		uart_read();
 	}
 }
-
 
 ///////////////  Utility Functions ///////////////
 
@@ -144,6 +150,10 @@ void uart_read(void) {
 }
 
 void cmd_lookup(char command[]) {
+	if (command[0] == 'o' && command[1] == 'n'){
+		uart_print ("command on", 10);
+		pwm_start_motor();
+	}
 	if (command[0] == 'f' && command[1] == 'o'){
 		uart_print ("command forward", 15);
 		UARTCharPut(UART0_BASE, '\r');
@@ -229,6 +239,13 @@ void front_sensor_read(void){
 	delay();
 }
 
+/// ADC ///
+
+void pwm_start_motor(void){
+	PWMOutputState(PWM1_BASE, PWM_OUT_1_BIT, true);
+	PWMOutputState(PWM1_BASE, PWM_OUT_0_BIT, true);
+}
+
 /// Delay ///
 
 void delay(void)
@@ -306,6 +323,7 @@ void hw_init(void)
     SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
     uart_init();
     adc_init();
+    pwm_init();
 
 }
 
@@ -333,8 +351,6 @@ void uart_init(void){
 
 void adc_init(void)
 {
-	// set system clock (will be 40 MHz)
-	SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
 	// Enable ADC0 module
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0);
 	SysCtlPeripheralReset(SYSCTL_PERIPH_ADC0);
@@ -356,4 +372,39 @@ void adc_init(void)
 	ADCSequenceConfigure(ADC0_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);
 	ADCSequenceStepConfigure(ADC0_BASE, 3, 0, ADC_CTL_CH1 | ADC_CTL_IE | ADC_CTL_END);
 	ADCSequenceEnable(ADC0_BASE, 3);
+}
+
+void pwm_init(void){
+	// set PWM clock
+	volatile uint32_t PWMclk = SysCtlClockGet() / 64;
+	volatile uint32_t PWMload = (PWMclk / PWMFREQ) - 1;
+	SysCtlPWMClockSet(SYSCTL_PWMDIV_64);
+	//Enable PWM1 and Port D for GPIO
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_PWM1);
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
+	SysCtlPeripheralReset(SYSCTL_PERIPH_PWM1);
+	SysCtlPeripheralReset(SYSCTL_PERIPH_GPIOD);
+	// Set PD2 for input
+	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_2);
+	// Set PD3 for input
+	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_3);
+	//Configure PD0 - connection with PD2
+	GPIOPinTypePWM(GPIO_PORTD_BASE, GPIO_PIN_0);
+	GPIOPinConfigure(GPIO_PD0_M1PWM0);
+	//Configure PD1 - connection with PD3
+	GPIOPinTypePWM(GPIO_PORTD_BASE, GPIO_PIN_1);
+	GPIOPinConfigure(GPIO_PD1_M1PWM1);
+	// set counter for PWM1
+	// Configure Generator 0, counting down
+	PWMGenConfigure(PWM1_BASE, PWM_GEN_0, PWM_GEN_MODE_DOWN);
+	PWMGenPeriodSet(PWM1_BASE, PWM_GEN_0, PWMload);
+	// Configure Generator 0, counting down
+	PWMGenConfigure(PWM1_BASE, PWM_GEN_1, PWM_GEN_MODE_DOWN);
+	PWMGenPeriodSet(PWM1_BASE, PWM_GEN_1, PWMload);
+	// Enable Generator 1
+	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_0, 7000);
+	PWMGenEnable(PWM1_BASE, PWM_GEN_0);
+	// Enable Generator 2
+	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_1, 7000);
+	PWMGenEnable(PWM1_BASE, PWM_GEN_1);
 }
