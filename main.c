@@ -98,7 +98,7 @@ void uart_int_handler(void){
 int main(void){
 	hw_init();
 	delay();
-	uart_print("Current commands: on (on), fo (forward), st (stop), sp (set speed), er (error)", 8+7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7+4);
+	uart_print("Current commands: fo (forward), st (stop), sp (set speed), er (error)", 7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7+4);
 	UARTCharPut(UART0_BASE, '\r');
 	UARTCharPut(UART0_BASE, '\n');
 	uart_cmd_start();
@@ -150,10 +150,6 @@ void uart_read(void) {
 }
 
 void cmd_lookup(char command[]) {
-	if (command[0] == 'o' && command[1] == 'n'){
-		uart_print ("command on", 10);
-		pwm_start_motor();
-	}
 	if (command[0] == 'f' && command[1] == 'o'){
 		uart_print ("command forward", 15);
 		UARTCharPut(UART0_BASE, '\r');
@@ -323,7 +319,7 @@ void hw_init(void)
     SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
     uart_init();
     adc_init();
-    pwm_init();
+    //pwm_init();
 
 }
 
@@ -407,4 +403,5 @@ void pwm_init(void){
 	// Enable Generator 2
 	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_1, 7000);
 	PWMGenEnable(PWM1_BASE, PWM_GEN_1);
+	pwm_start_motor();
 }
