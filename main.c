@@ -58,6 +58,7 @@
 int count = 0; // count entered characters in uart
 uint32_t adcVals; // read adc value of side sensor
 uint32_t adcValf; // read adc value of side sensor
+uint32_t PWMload; // to store load value for PWM
 
 ///////////////  Function Prototypes ///////////////
 
@@ -65,6 +66,7 @@ uint32_t adcValf; // read adc value of side sensor
 void hw_init(void);
 void uart_init(void);
 void adc_init(void);
+void pwm_init(void);
 void delay(void);
 //UART
 void uart_print(const char * , uint32_t);
@@ -75,8 +77,9 @@ void cmd_lookup(char *);
 void side_sensor_read(void);
 void front_sensor_read(void);
 // PWM
-void pwm_init(void);
 void pwm_start_motor(void);
+void pwm_forward(void);
+void pwm_stop(void);
 // Float to String
 void ftoa(float, char *, int);
 void reverse(char *, int);
@@ -98,7 +101,7 @@ void uart_int_handler(void){
 int main(void){
 	hw_init();
 	delay();
-	uart_print("Current commands: fo (forward), st (stop), sp (set speed), er (error)", 7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7+4);
+	uart_print("Current commands: re (ready), fo (forward), st (stop), sp (set speed), er (error)", 12+7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7+4);
 	UARTCharPut(UART0_BASE, '\r');
 	UARTCharPut(UART0_BASE, '\n');
 	uart_cmd_start();
@@ -150,18 +153,23 @@ void uart_read(void) {
 }
 
 void cmd_lookup(char command[]) {
-	if (command[0] == 'f' && command[1] == 'o'){
+	if (command[0] == 'r' && command[1] == 'e'){
+		uart_print ("command ready", 13);
+		pwm_start_motor();
+	} else if (command[0] == 'f' && command[1] == 'o'){
 		uart_print ("command forward", 15);
+		pwm_forward();
 		UARTCharPut(UART0_BASE, '\r');
 		UARTCharPut(UART0_BASE, '\n');
-		while(1){
+		/*while(1){
 			front_sensor_read();
 			side_sensor_read();
 			UARTCharPut(UART0_BASE, '\r');
 			UARTCharPut(UART0_BASE, '\n');
-		}
+		}*/
 	} else if (command[0] == 's' && command[1] == 't'){
 		uart_print ("command stop", 12);
+		pwm_stop();
 	} else if (command[0] == 's' && command[1] == 'p'){
 		uart_print ("command set motor speed", 23);
 	} else if (command[0] == 'e' && command[1] == 'r'){
@@ -235,11 +243,23 @@ void front_sensor_read(void){
 	delay();
 }
 
-/// ADC ///
+/// PWM ///
 
 void pwm_start_motor(void){
-	PWMOutputState(PWM1_BASE, PWM_OUT_1_BIT, true);
-	PWMOutputState(PWM1_BASE, PWM_OUT_0_BIT, true);
+	PWMOutputState(PWM1_BASE, PWM_OUT_2_BIT, true);
+	PWMOutputState(PWM1_BASE, PWM_OUT_3_BIT, true);
+}
+
+void pwm_forward(void){
+	GPIOPinWrite(GPIO_PORTD_BASE, GPIO_PIN_0, 2);
+	GPIOPinWrite(GPIO_PORTD_BASE, GPIO_PIN_1, 4);
+	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_2, PWMload);
+	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_3, PWMload);
+}
+
+void pwm_stop(void){
+	PWMOutputState(PWM1_BASE, PWM_OUT_2_BIT, false);
+	PWMOutputState(PWM1_BASE, PWM_OUT_3_BIT, false);
 }
 
 /// Delay ///
@@ -371,37 +391,41 @@ void adc_init(void)
 }
 
 void pwm_init(void){
+	uint32_t PWMclk = SysCtlClockGet() / 64;
+	PWMload = (PWMclk / PWMFREQ) - 1;
 	// set PWM clock
-	volatile uint32_t PWMclk = SysCtlClockGet() / 64;
-	volatile uint32_t PWMload = (PWMclk / PWMFREQ) - 1;
 	SysCtlPWMClockSet(SYSCTL_PWMDIV_64);
-	//Enable PWM1 and Port D for GPIO
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_PWM1);
+
+	//Enable Port D for GPIO (use for phase and mode)
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
-	SysCtlPeripheralReset(SYSCTL_PERIPH_PWM1);
-	SysCtlPeripheralReset(SYSCTL_PERIPH_GPIOD);
-	// Set PD2 for input
-	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_2);
-	// Set PD3 for input
-	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_3);
-	//Configure PD0 - connection with PD2
-	GPIOPinTypePWM(GPIO_PORTD_BASE, GPIO_PIN_0);
-	GPIOPinConfigure(GPIO_PD0_M1PWM0);
-	//Configure PD1 - connection with PD3
-	GPIOPinTypePWM(GPIO_PORTD_BASE, GPIO_PIN_1);
-	GPIOPinConfigure(GPIO_PD1_M1PWM1);
-	// set counter for PWM1
+	//Enable Port B for GPIO (use for motor)
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
+	// Set PWM 1
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_PWM1);
+	// Set PD0 for phase A
+	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_0);
+	// Set PB4 for PWM output motor A
+	GPIOPinTypePWM(GPIO_PORTB_BASE, GPIO_PIN_4);
+	GPIOPinConfigure(GPIO_PB4_M0PWM2);
+	// Set PD1 for phase B
+	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_1);
+	// Set PB5 for PWM output motor B
+	GPIOPinTypePWM(GPIO_PORTB_BASE, GPIO_PIN_5);
+	GPIOPinConfigure(GPIO_PB5_M0PWM3);
+	// Set PD2 for mode
+	//GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_2);
+
 	// Configure Generator 0, counting down
 	PWMGenConfigure(PWM1_BASE, PWM_GEN_0, PWM_GEN_MODE_DOWN);
 	PWMGenPeriodSet(PWM1_BASE, PWM_GEN_0, PWMload);
-	// Configure Generator 0, counting down
-	PWMGenConfigure(PWM1_BASE, PWM_GEN_1, PWM_GEN_MODE_DOWN);
-	PWMGenPeriodSet(PWM1_BASE, PWM_GEN_1, PWMload);
-	// Enable Generator 1
-	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_0, 7000);
+
+	// make mode = 1 (high)
+	//GPIOPinWrite(GPIO_PORTD_BASE, GPIO_PIN_2, 2);
+
+	// Enable Generator 0 with PWM outputs
+	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_2, 1);
+	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_3, 1);
 	PWMGenEnable(PWM1_BASE, PWM_GEN_0);
-	// Enable Generator 2
-	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_1, 7000);
-	PWMGenEnable(PWM1_BASE, PWM_GEN_1);
+	// start motor A and B
 	pwm_start_motor();
 }
