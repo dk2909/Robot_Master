@@ -251,8 +251,8 @@ void pwm_start_motor(void){
 }
 
 void pwm_forward(void){
-	GPIOPinWrite(GPIO_PORTD_BASE, GPIO_PIN_0, 2);
-	GPIOPinWrite(GPIO_PORTD_BASE, GPIO_PIN_1, 4);
+	GPIOPinWrite(GPIO_PORTD_BASE, GPIO_PIN_0, 1);
+	GPIOPinWrite(GPIO_PORTD_BASE, GPIO_PIN_1, 2);
 	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_2, PWMload);
 	PWMPulseWidthSet(PWM1_BASE, PWM_OUT_3, PWMload);
 }
@@ -339,7 +339,7 @@ void hw_init(void)
     SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
     uart_init();
     adc_init();
-    //pwm_init();
+    pwm_init();
 
 }
 
