@@ -5,15 +5,17 @@
  *      Author: dking
  */
 
-#include <stdio.h>
+//#include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
+#include <time.h>
 
+#include "inc/hw_ints.h"
 #include <inc/hw_memmap.h>
 #include <inc/hw_types.h>
 #include <inc/hw_gpio.h>
-#include "inc/tm4c123gh6pm.h"
+//#include "inc/tm4c123gh6pm.h"
 #include "inc/hw_timer.h"
 
 #include <driverlib/sysctl.h>
@@ -29,25 +31,23 @@
 #include <ti/drivers/UART.h>
 #include <ti/drivers/uart/UARTTiva.h>
 
-#include <time.h>
-
-#include <ti/sysbios/BIOS.h>
-#include <ti/sysbios/knl/Task.h>
-
-#include <xdc/runtime/System.h>
+#include <xdc/std.h> // include first for bios types
+#include <ti/sysbios/BIOS.h> // has APIs like BIOS_start()
+//#include <ti/sysbios/knl/Task.h>
 #include <xdc/runtime/Log.h>
+//#include <xdc/runtime/System.h>
 #include <xdc/cfg/global.h>
 
 ///////////////  Definitions ///////////////
 // UART , change macros, ctrl+F and replace all occurrences
 #define UARTGPIOPERI "SYSCTL_PERIPH_GPIOA"
-#define UARTPERI "SYSCTL_PERIPH_UART5"
+#define UARTPERI "SYSCTL_PERIPH_UART0"
 #define UARTRX "GPIO_PA0_U0RX"
 #define UARTTX "GPIO_PA1_U0TX"
 #define UARTGPIOPORT "GPIO_PORTA_BASE"
 #define UARTGPIOPIN "GPIO_PIN_0 | GPIO_PIN_1"
-#define UARTBASE "UART5_BASE"
-#define UARTINT "INT_UART5"
+#define UARTBASE "UART0_BASE"
+#define UARTINT "INT_UART0"
 #define UARTBAUDE 9600
 
 // PWM
@@ -68,7 +68,10 @@ void hw_init(void);
 void uart_init(void);
 void adc_init(void);
 void pwm_init(void);
+void timer_init(void);
 void delay(void);
+void uart_int_handler(void);
+void ISR_hwi(void);
 //UART
 void uart_print(const char * , uint32_t);
 void uart_cmd_start(void);
@@ -90,28 +93,55 @@ int intToStr(int, char *, int);
 
 ///////////////  Tasks ///////////////
 
-void uart_int_handler(void){
-	uint32_t statusInt;
 
-	// get and clear interrupt status
-    statusInt = UARTIntStatus(UART5_BASE, true);
-    UARTIntClear(UART5_BASE, statusInt);
-    // read uart
-    //uart_read();
-}
 
 ///////////////  Main ///////////////
 int main(void){
 	hw_init();
+	//uart_print("Current commands: re (ready), fo (forward), st (stop), hs (high speed), ls (low speed), sp (set speed), er (error)", 33+12+7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7+4);
+	//UARTCharPut(UART0_BASE, '\r');
+	//UARTCharPut(UART0_BASE, '\n');
+	delay();
+
+	BIOS_start();
+	/*
 	delay();
 	uart_print("Current commands: re (ready), fo (forward), st (stop), hs (high speed), ls (low speed), sp (set speed), er (error)", 33+12+7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7+4);
-	UARTCharPut(UART5_BASE, '\r');
-	UARTCharPut(UART5_BASE, '\n');
+	UARTCharPut(UART0_BASE, '\r');
+	UARTCharPut(UART0_BASE, '\n');
 	uart_cmd_start();
-	//pwm_forward();
+
 	while(1){
 		uart_read();
-	}
+	}*/
+}
+
+// Hardware interrupt
+void ISR_hwi(void){
+	uart_print("Current commands: re (ready), fo (forward), st (stop), hs (high speed), ls (low speed), sp (set speed), er (error)", 33+12+7+1+9+1+2+1+10+1+2+7+1+2+12+1+2+7+4);
+	UARTCharPut(UART0_BASE, '\r');
+	UARTCharPut(UART0_BASE, '\n');
+	TimerIntClear(TIMER2_BASE, TIMER_TIMA_TIMEOUT);
+	Swi_post(swi0);
+	//uart_int_handler();
+}
+
+void uart_int_handler(void){
+	//TimerIntClear(TIMER2_BASE, TIMER_TIMA_TIMEOUT);
+	uint32_t statusInt;
+	// get and clear interrupt status
+    statusInt = UARTIntStatus(UART0_BASE, true);
+    UARTIntClear(UART0_BASE, statusInt);
+
+    uart_cmd_start(); // enter command prompt
+    //uart_read(); // read command
+}
+
+/// Delay ///
+
+void delay(void)
+{
+	SysCtlDelay(6700000); // ~500ms delay
 }
 
 ///////////////  Utility Functions ///////////////
@@ -121,7 +151,7 @@ int main(void){
 void uart_print(const char * str, uint32_t len){
 	uint32_t i;
 	for(i = 0; i < len; i++){
-		UARTCharPut(UART5_BASE, str[i]);
+		UARTCharPut(UART0_BASE, str[i]);
 	}
 }
 
@@ -135,18 +165,18 @@ void uart_read(void) {
 	char cmd_arr[2];
 	char cmd_char;
     // read command
-    while(UARTCharsAvail(UART5_BASE)){
+    while(UARTCharsAvail(UART0_BASE)){
     	// echo input into prompt, non-blocking here
-    	cmd_char = UARTCharGetNonBlocking(UART5_BASE);
-    	UARTCharPutNonBlocking(UART5_BASE, cmd_char);
+    	cmd_char = UARTCharGetNonBlocking(UART0_BASE);
+    	UARTCharPutNonBlocking(UART0_BASE, cmd_char);
     	// store character
     	cmd_arr[count] = cmd_char;
     	count++;
     	// return if we already have two characters
     	if(count == 2){
     		// carriage return and new line
-    		UARTCharPut(UART5_BASE, '\r');
-    		UARTCharPut(UART5_BASE, '\n');
+    		UARTCharPut(UART0_BASE, '\r');
+    		UARTCharPut(UART0_BASE, '\n');
     		// reset counter
     		count = 0;
     		// interpret command
@@ -159,27 +189,27 @@ void uart_read(void) {
 void cmd_lookup(char command[]) {
 	if (command[0] == 'r' && command[1] == 'e'){
 		uart_print ("command ready", 13);
-		pwm_start_motor();
+		//pwm_start_motor();
 	} else if (command[0] == 'f' && command[1] == 'o'){
 		uart_print ("command forward", 15);
-		pwm_forward();
-		UARTCharPut(UART5_BASE, '\r');
-		UARTCharPut(UART5_BASE, '\n');
+		//pwm_forward();
+		UARTCharPut(UART0_BASE, '\r');
+		UARTCharPut(UART0_BASE, '\n');
 		/*while(1){
 			front_sensor_read();
 			side_sensor_read();
-			UARTCharPut(UART5_BASE, '\r');
-			UARTCharPut(UART5_BASE, '\n');
+			UARTCharPut(UART0_BASE, '\r');
+			UARTCharPut(UART0_BASE, '\n');
 		}*/
 	} else if (command[0] == 'h' && command[1] == 's'){
 		uart_print ("command high speed", 18);
-		pwm_high_speed();
+		//pwm_high_speed();
 	} else if (command[0] == 'l' && command[1] == 's'){
 		uart_print ("command low speed", 17);
-		pwm_low_speed();
+		//pwm_low_speed();
 	} else if (command[0] == 's' && command[1] == 't'){
 		uart_print ("command stop", 12);
-		pwm_stop();
+		//pwm_stop();
 	} else if (command[0] == 's' && command[1] == 'p'){
 		uart_print ("command set motor speed", 23);
 	} else if (command[0] == 'e' && command[1] == 'r'){
@@ -187,9 +217,9 @@ void cmd_lookup(char command[]) {
 	} else {
 		uart_print ("command not found", 17);
 	}
-	UARTCharPut(UART5_BASE, '\r');
-	UARTCharPut(UART5_BASE, '\n');
-	UARTCharPut(UART5_BASE, '\n');
+	UARTCharPut(UART0_BASE, '\r');
+	UARTCharPut(UART0_BASE, '\n');
+	UARTCharPut(UART0_BASE, '\n');
 	uart_cmd_start();
 }
 
@@ -211,7 +241,7 @@ void side_sensor_read(void){
 	// convert float to string
 	ftoa(distance, uartOut, 4);
 	// write output (UART)
-	//UARTCharPut(UART5_BASE, '\n');
+	//UARTCharPut(UART0_BASE, '\n');
 	uart_print("Side Distance : ", 17);
 	uart_print(uartOut, 8);
 
@@ -220,8 +250,8 @@ void side_sensor_read(void){
 		uart_print("Side Too close", 14);
 		//cmd_lookup(cmd_arr);
 	} */
-	UARTCharPut(UART5_BASE, '\r');
-	UARTCharPut(UART5_BASE, '\n');
+	UARTCharPut(UART0_BASE, '\r');
+	UARTCharPut(UART0_BASE, '\n');
 	delay();
 }
 
@@ -240,7 +270,7 @@ void front_sensor_read(void){
 	// convert float to string
 	ftoa(distance, uartOut, 4);
 	// write output (UART)
-	//UARTCharPut(UART5_BASE, '\n');
+	//UARTCharPut(UART0_BASE, '\n');
 	uart_print("Front Distance: ", 17);
 	uart_print(uartOut, 8);
 	/*
@@ -248,8 +278,8 @@ void front_sensor_read(void){
 		uart_print("Front Too close", 14+1);
 		//cmd_lookup(cmd_arr);
 	}*/
-	UARTCharPut(UART5_BASE, '\r');
-	UARTCharPut(UART5_BASE, '\n');
+	UARTCharPut(UART0_BASE, '\r');
+	UARTCharPut(UART0_BASE, '\n');
 	delay();
 }
 
@@ -299,12 +329,6 @@ void pwm_low_speed(void){
 	PWMOutputState(PWM1_BASE, PWM_OUT_3_BIT, true);
 }
 
-/// Delay ///
-
-void delay(void)
-{
-	SysCtlDelay(6700000); // ~500ms delay
-}
 
 /// Float to String conversion ///
 
@@ -376,30 +400,31 @@ void hw_init(void)
     SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
     uart_init();
     //adc_init();
-    pwm_init();
-
+    //pwm_init();
+    timer_init();
 }
 
 void uart_init(void){
     // enable Port for GPIO and UART
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_UART5);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA); // Virtual
+    // SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE); // Bluetooth
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0); // Virtual
     // configure receiver (Rx)
-    GPIOPinConfigure(GPIO_PE4_U5RX);
+    GPIOPinConfigure(GPIO_PA0_U0RX); // Virtual
     // configure transmitter (Tx)
-    GPIOPinConfigure(GPIO_PE5_U5TX);
+    GPIOPinConfigure(GPIO_PA1_U0TX); // Virtual
     // configure PB0 and PB1 for input
-    GPIOPinTypeUART(GPIO_PORTE_BASE, GPIO_PIN_4 | GPIO_PIN_5);
+    GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1);
     // configure UART, 9600 8-n-1
-    UARTConfigSetExpClk(UART5_BASE, SysCtlClockGet(), 115200, (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE));
-    // enable UART5
-    UARTEnable(UART5_BASE);
+    UARTConfigSetExpClk(UART0_BASE, SysCtlClockGet(), 9600, (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE)); // 9600 for virtual
+    // enable UART0
+    UARTEnable(UART0_BASE);
     // enable interrupts on processor
     IntMasterEnable();
-    // enable interrupts on UART5
-    IntEnable(INT_UART5);
-    // enable interrupts for UART5, Rx and Tx
-    UARTIntEnable(UART5_BASE, UART_INT_RX | UART_INT_RT);
+    // enable interrupts on UART0
+    IntEnable(INT_UART0);
+    // enable interrupts for UART0, Rx and Tx
+    UARTIntEnable(UART0_BASE, UART_INT_RX | UART_INT_RT);
 }
 
 void adc_init(void)
@@ -469,4 +494,13 @@ void pwm_init(void){
 	// start motor A and B
 	pwm_start_motor();
 	PWMGenEnable(PWM1_BASE, PWM_GEN_1);
+}
+
+void timer_init(void){
+	uint32_t period;
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER2); // enable Timer2 peripheral clocks
+	TimerConfigure(TIMER2_BASE, TIMER_CFG_PERIODIC); // cfg timer2 mode - periodic
+	period = (SysCtlClockGet()/2); // period = CPU clk div 2 (500 ms)
+	TimerLoadSet(TIMER2_BASE, TIMER_TIMA_TIMEOUT, period); // enables Timer2 to interrupt CPU
+	TimerEnable(TIMER2_BASE, TIMER_A);
 }
